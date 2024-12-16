@@ -1,7 +1,8 @@
 import cv2
 import face_recognition
 import os
-import serial
+import numpy as np
+import pickle
 
 # ฟังก์ชั่นในการโหลดหลายรูปภาพและเก็บ face encoding
 def load_face_data(image_paths):
@@ -35,15 +36,20 @@ def load_face_data(image_paths):
             if os.path.basename(image_path).startswith("Ford"):
                 known_face_names.append("Ford")  # สำหรับรูปของ Ford
             elif os.path.basename(image_path).startswith("t"):
-                known_face_names.append("Te")    # สำหรับรูปของ Te
+                known_face_names.append("tae")    # สำหรับรูปของ Te
+            elif os.path.basename(image_path).startswith("g"):
+                known_face_names.append("gg")    # สำหรับรูปของ gg
+            elif os.path.basename(image_path).startswith("j"):
+                known_face_names.append("jj")    # สำหรับรูปของ gg
             else:
                 known_face_names.append("Unknown")  # รูปอื่น ๆ ที่ไม่ตรงตามเงื่อนไข
 
     return known_face_encodings, known_face_names
 
 # ฟังก์ชั่นในการตรวจสอบใบหน้าจากกล้อง
-def recognize_face_from_camera(known_face_encodings, known_face_names, ser):
+def recognize_face_from_camera(known_face_encodings, known_face_names):
     cap = cv2.VideoCapture(0)  # เปิดกล้อง (ใช้กล้องตัวแรก)
+    TOLERANCE = 0.4  # ความเคร่งครัดในการจับคู่
     if not cap.isOpened():
         print("ไม่สามารถเปิดกล้องได้")
         return
@@ -62,45 +68,30 @@ def recognize_face_from_camera(known_face_encodings, known_face_names, ser):
         face_locations = face_recognition.face_locations(rgb_small_frame)
         face_encodings = face_recognition.face_encodings(rgb_small_frame, face_locations)
 
-        if len(face_locations) == 0:
-            # หากไม่พบใบหน้า
-            print("ไม่พบใบหน้า")
-            recognized_name = "ไม่พบใบหน้า"
-            # ส่งคำสั่งไปยัง Arduino ปิดประตู
-            ser.write(b"0")
-        else:
-            face_recognized = False  # ตัวแปรเพื่อตรวจสอบว่าเจอใบหน้าที่รู้จักหรือไม่
-            recognized_name = "ไม่รู้จักใบหน้านี้"  # กำหนดชื่อเริ่มต้นเป็น "ไม่รู้จักใบหน้านี้"
+        for (top, right, bottom, left), face_encoding in zip(face_locations, face_encodings):
+            # เปรียบเทียบใบหน้าในภาพกับใบหน้าที่รู้จัก
+            matches = face_recognition.compare_faces(known_face_encodings, face_encoding, tolerance=TOLERANCE)
+            face_distances = face_recognition.face_distance(known_face_encodings, face_encoding)
+            name = "Unknown"  # ตั้งค่าเริ่มต้นเป็น Unknown
 
-            for (top, right, bottom, left), face_encoding in zip(face_locations, face_encodings):
-                # เปรียบเทียบใบหน้าในภาพกับใบหน้าที่รู้จัก
-                matches = face_recognition.compare_faces(known_face_encodings, face_encoding, tolerance=0.6)
+            # ถ้ามีการจับคู่ที่สำเร็จ เลือกใบหน้าที่ใกล้เคียงที่สุด
+            if len(face_distances) > 0 and matches:
+                best_match_index = np.argmin(face_distances)
+                if matches[best_match_index]:
+                    name = known_face_names[best_match_index]
 
-                # ถ้ามีการจับคู่ที่สำเร็จ
-                if True in matches:
-                    first_match_index = matches.index(True)
-                    recognized_name = f"ใบหน้านี้คือ: {known_face_names[first_match_index]}"  # แสดงชื่อที่รู้จัก
-                    face_recognized = True
-
-            if face_recognized:
-                print(recognized_name)
-                # ส่งคำสั่งไปยัง Arduino เปิดประตู
-                ser.write(b"1")
-            else:
-                print(recognized_name)
-                # ส่งคำสั่งไปยัง Arduino ปิดประตู
-                ser.write(b"0")
-
-        # วาดกรอบรอบใบหน้า
-        for (top, right, bottom, left) in face_locations:
             # คูณตำแหน่งใบหน้ากลับเพื่อให้ตรงกับขนาดภาพต้นฉบับ
             top *= 4
             right *= 4
             bottom *= 4
             left *= 4
 
-            # วาดกรอบรอบใบหน้าในภาพ
-            cv2.rectangle(frame, (left, top), (right, bottom), (0, 0, 255), 2)
+            # ตั้งสีกรอบและข้อความ
+            color = (0, 255, 0) if name != "Unknown" else (0, 0, 255)
+
+            # วาดกรอบรอบใบหน้าและชื่อ
+            cv2.rectangle(frame, (left, top), (right, bottom), color, 2)
+            cv2.putText(frame, name, (left, top - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.9, color, 2)
 
         # แสดงภาพที่ได้จากกล้อง
         cv2.imshow("Face Recognition", frame)
@@ -112,12 +103,11 @@ def recognize_face_from_camera(known_face_encodings, known_face_names, ser):
     cap.release()
     cv2.destroyAllWindows()
 
-# เชื่อมต่อกับ Arduino
-ser = serial.Serial('COM8', 9600)  # ตรวจสอบ COM port ของ Arduino
+# รายชื่อไฟล์ภาพ
 image_paths = [
-    'Ford1.jpg',
-    'Ford2.jpg',
-    'Ford3.jpg',
+    'Ford1.jpg',  # รูปแรกของคุณ (Ford)
+    'Ford2.jpg',  # รูปที่สองของคุณ (Ford)
+    'Ford3.jpg',  # รูปที่สามของคุณ (Ford)
     'Ford4.jpg',
     'Ford5.jpg',
     'Ford6.jpg',
@@ -125,15 +115,47 @@ image_paths = [
     'Ford8.jpg',
     'Ford9.jpg',
     'Ford10.jpg',
-    't1.jpg',
-    't2.jpg',
-    't3.jpg',
-    't4.jpg',
-    't5.jpg'
+    't1.jpg',     # รูปแรกของ Te
+    't2.jpg',     # รูปที่สองของ Te
+    't3.jpg',     # รูปที่สามของ Te
+    't4.jpg',     # รูปที่สี่ของ Te
+    't5.jpg' ,     # รูปที่ห้าของ Te
+    't6.jpg' , 
+    't7.jpg'  ,
+    't8.jpg'  ,
+    't9.jpg'  ,
+    't10.jpg'  ,
+    'g1.jpg' ,  
+    'g2.jpg' , 
+    'g3.jpg' , 
+    'g4.jpg' , 
+    'g5.jpg' , 
+    'g6.jpg' , 
+    'g7.jpg' , 
+    'g8.jpg'  , 
+    'j1.jpg'  , 
+    'j2.jpg'  ,
+    'j3.jpg',
+    'j4.jpg',
+    'j5.jpg',
+    'j6.jpg',
+    'j7.jpg',
+    'j8.jpg',
+    'j9.jpg'
+ 
+
 ]
 
-# โหลดข้อมูลใบหน้าจากรูปภาพ
-known_face_encodings, known_face_names = load_face_data(image_paths)
+# ถ้ามีไฟล์ pickle ใช้ข้อมูลเดิม ไม่ต้องโหลดใหม่
+if os.path.exists('face_data.pkl'):
+    with open('face_data.pkl', 'rb') as f:
+        known_face_encodings, known_face_names = pickle.load(f)
+else:
+    # โหลดข้อมูลใบหน้าใหม่
+    known_face_encodings, known_face_names = load_face_data(image_paths)
+    # บันทึกข้อมูลเพื่อใช้ในอนาคต
+    with open('face_data.pkl', 'wb') as f:
+        pickle.dump((known_face_encodings, known_face_names), f)
 
 # ทดสอบการจดจำใบหน้าจากกล้อง
-recognize_face_from_camera(known_face_encodings, known_face_names, ser)
+recognize_face_from_camera(known_face_encodings, known_face_names)

@@ -5,7 +5,7 @@ import os
 import time
 
 # ตั้งค่าพอร์ต Serial ที่เชื่อมต่อกับ Arduino UNO
-ser = serial.Serial('COM8', 9600)  # เปลี่ยน 'COM8' ให้ตรงกับพอร์ตที่เชื่อมต่อ
+ser = serial.Serial('COM9', 9600)  # เปลี่ยน 'COM8' ให้ตรงกับพอร์ตที่เชื่อมต่อ
 ser.flushInput()
 
 # ฟังก์ชั่นในการโหลดข้อมูลใบหน้าและเก็บ face encoding
